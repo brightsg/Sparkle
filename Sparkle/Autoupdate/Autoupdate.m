@@ -3,10 +3,67 @@
 #import "SUHost.h"
 #import "SUStandardVersionComparator.h"
 #import "SUStatusController.h"
-#import "SUPlainInstallerInternals.h"
 #import "SULog.h"
 
 #include <unistd.h>
+
+/*!
+ * Time this app uses to recheck if the parent has already died.
+ */
+static const NSTimeInterval SUParentQuitCheckInterval = .25;
+
+@interface TerminationListener : NSObject
+
+- (instancetype)initWithProcessId:(pid_t)pid;
+
+@end
+
+@interface TerminationListener ()
+
+@property (nonatomic, assign) pid_t processIdentifier;
+@property (nonatomic, strong) NSTimer *watchdogTimer;
+
+@end
+
+@implementation TerminationListener
+
+@synthesize processIdentifier = _processIdentifier;
+@synthesize watchdogTimer = _watchdogTimer;
+
+- (instancetype)initWithProcessId:(pid_t)pid
+{
+    if (!(self = [super init])) {
+        return nil;
+    }
+
+    self.processIdentifier = pid;
+
+    return self;
+}
+
+- (void)cleanupWithCompletion:(void (^)(void))completionBlock
+{
+    [self.watchdogTimer invalidate];
+    completionBlock();
+}
+
+- (void)startListeningWithCompletion:(void (^)(void))completionBlock
+{
+    BOOL alreadyTerminated = (getppid() == 1); // ppid is launchd (1) => parent terminated already
+    if (alreadyTerminated)
+        [self cleanupWithCompletion:completionBlock];
+    else
+        self.watchdogTimer = [NSTimer scheduledTimerWithTimeInterval:SUParentQuitCheckInterval target:self selector:@selector(watchdog:) userInfo:completionBlock repeats:YES];
+}
+
+- (void)watchdog:(NSTimer *)timer
+{
+    if (![NSRunningApplication runningApplicationWithProcessIdentifier:self.processIdentifier]) {
+        [self cleanupWithCompletion:timer.userInfo];
+    }
+}
+
+@end
 
 /*!
  * If the Installation takes longer than this time the Application Icon is shown in the Dock so that the user has some feedback.
@@ -14,199 +71,205 @@
 static const NSTimeInterval SUInstallationTimeLimit = 5;
 
 /*!
- * Time this app uses to recheck if the parent has already died.
+ * Terminate the application after a delay from launching the new update to avoid OS activation issues
+ * This delay should be be high enough to increase the likelihood that our updated app will be launched up front,
+ * but should be low enough so that the user doesn't ponder why the updater hasn't finished terminating yet
  */
-static const NSTimeInterval SUParentQuitCheckInterval = .25;
+static const NSTimeInterval SUTerminationTimeDelay = 0.5;
 
-@interface TerminationListener : NSObject <SUInstallerDelegate>
+@interface AppInstaller : NSObject <NSApplicationDelegate>
 
-@property (copy) NSString *hostpath;
-@property (copy) NSString *executablepath;
-@property (assign) pid_t parentprocessid;
-@property (copy) NSString *folderpath;
-
-@property (copy) NSString *selfPath;
-@property (copy) NSString *installationPath;
-@property (strong) NSTimer *watchdogTimer;
-@property (strong) NSTimer *longInstallationTimer;
-@property (strong) SUHost *host;
-@property (assign) BOOL shouldRelaunch;
-@property (assign) BOOL shouldShowUI;
-@property (strong) SUStatusController *statusController;
-
-- (void)parentHasQuit;
-
-- (void)relaunch;
-- (void)install;
-
-- (void)showAppIconInDock:(NSTimer *)aTimer;
-- (void)watchdog:(NSTimer *)aTimer;
+/*
+ * hostPath - path to host (original) application
+ * relaunchPath - path to what the host wants to relaunch (default is same as hostPath)
+ * parentProcessId - process identifier of the host before launching us
+ * updateFolderPath - path to update folder (i.e, temporary directory containing the new update)
+ * shouldRelaunch - indicates if the new installed app should re-launched
+ * shouldShowUI - indicates if we should show the status window when installing the update
+ */
+- (instancetype)initWithHostPath:(NSString *)hostPath relaunchPath:(NSString *)relaunchPath parentProcessId:(pid_t)parentProcessId updateFolderPath:(NSString *)updateFolderPath shouldRelaunch:(BOOL)shouldRelaunch shouldShowUI:(BOOL)shouldShowUI;
 
 @end
 
-@implementation TerminationListener
+@interface AppInstaller ()
 
-@synthesize hostpath;
-@synthesize executablepath;
-@synthesize parentprocessid;
-@synthesize folderpath;
+@property (nonatomic, strong) TerminationListener *terminationListener;
+@property (nonatomic, strong) SUStatusController *statusController;
 
-@synthesize selfPath;
-@synthesize installationPath;
-@synthesize watchdogTimer;
-@synthesize longInstallationTimer;
-@synthesize host;
-@synthesize shouldRelaunch;
-@synthesize shouldShowUI;
-@synthesize statusController;
+@property (nonatomic, copy) NSString *updateFolderPath;
+@property (nonatomic, copy) NSString *hostPath;
+@property (nonatomic, copy) NSString *relaunchPath;
+@property (nonatomic, assign) BOOL shouldRelaunch;
+@property (nonatomic, assign) BOOL shouldShowUI;
 
-- (instancetype)initWithHostPath:(NSString *)inhostpath executablePath:(NSString *)execpath parentProcessId:(pid_t)ppid folderPath:(NSString *)infolderpath shouldRelaunch:(BOOL)relaunch shouldShowUI:(BOOL)showUI selfPath:(NSString *)inSelfPath
+@property (nonatomic, assign) BOOL isTerminating;
+
+@end
+
+@implementation AppInstaller
+
+@synthesize terminationListener = _terminationListener;
+@synthesize statusController = _statusController;
+@synthesize updateFolderPath = _updateFolderPath;
+@synthesize hostPath = _hostPath;
+@synthesize relaunchPath = _relaunchPath;
+@synthesize shouldRelaunch = _shouldRelaunch;
+@synthesize shouldShowUI = _shouldShowUI;
+@synthesize isTerminating = _isTerminating;
+
+- (instancetype)initWithHostPath:(NSString *)hostPath relaunchPath:(NSString *)relaunchPath parentProcessId:(pid_t)parentProcessId updateFolderPath:(NSString *)updateFolderPath shouldRelaunch:(BOOL)shouldRelaunch shouldShowUI:(BOOL)shouldShowUI
 {
     if (!(self = [super init])) {
         return nil;
     }
-
-    self.hostpath = inhostpath;
-    self.executablepath = execpath;
-    self.parentprocessid = ppid;
-    self.folderpath = infolderpath;
-    self.selfPath = inSelfPath;
-    self.shouldRelaunch = relaunch;
-    self.shouldShowUI = showUI;
-
-    BOOL alreadyTerminated = (getppid() == 1); // ppid is launchd (1) => parent terminated already
-
-    if (alreadyTerminated)
-        [self parentHasQuit];
-    else
-        self.watchdogTimer = [NSTimer scheduledTimerWithTimeInterval:SUParentQuitCheckInterval target:self selector:@selector(watchdog:) userInfo:nil repeats:YES];
-
+    
+    self.hostPath = hostPath;
+    self.relaunchPath = relaunchPath;
+    self.terminationListener = [[TerminationListener alloc] initWithProcessId:parentProcessId];
+    self.updateFolderPath = updateFolderPath;
+    self.shouldRelaunch = shouldRelaunch;
+    self.shouldShowUI = shouldShowUI;
+    
     return self;
 }
 
-
-- (void)dealloc
+- (void)applicationDidFinishLaunching:(NSNotification __unused *)notification
 {
-    [self.longInstallationTimer invalidate];
-    [self.statusController close];
-}
-
-
-- (void)parentHasQuit
-{
-    [self.watchdogTimer invalidate];
-    self.longInstallationTimer = [NSTimer scheduledTimerWithTimeInterval:SUInstallationTimeLimit
-								target: self selector: @selector(showAppIconInDock:)
-								userInfo:nil repeats:NO];
-
-    if (self.folderpath)
+    [self.terminationListener startListeningWithCompletion:^{
+        self.terminationListener = nil;
+		
+        if (self.shouldShowUI) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(SUInstallationTimeLimit * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+				if (!self.isTerminating) {
+					// Show app icon in the dock
+					ProcessSerialNumber psn = { 0, kCurrentProcess };
+					TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+				}
+            });
+        }
+        
         [self install];
-    else
-        [self relaunch];
+    }];
 }
-
-- (void)watchdog:(NSTimer *)__unused aTimer
-{
-    if (![NSRunningApplication runningApplicationWithProcessIdentifier:self.parentprocessid]) {
-        [self parentHasQuit];
-    }
-}
-
-- (void)showAppIconInDock:(NSTimer *)__unused aTimer
-{
-    ProcessSerialNumber psn = { 0, kCurrentProcess };
-    TransformProcessType(&psn, kProcessTransformToForegroundApplication);
-}
-
-
-- (void)relaunch __attribute__((noreturn))
-{
-    if (self.shouldRelaunch)
-    {
-        NSString *appPath = nil;
-        if (!self.folderpath || ![self.executablepath isEqualToString:self.hostpath])
-            appPath = self.executablepath;
-        else
-            appPath = self.installationPath;
-        [[NSWorkspace sharedWorkspace] openFile:appPath];
-    }
-
-    if (self.folderpath)
-    {
-        NSError *theError = nil;
-        if (![SUPlainInstaller _removeFileAtPath:[SUInstaller updateFolder] error:&theError])
-            SULog(@"Couldn't remove update folder: %@.", theError);
-    }
-    [[NSFileManager defaultManager] removeItemAtPath:self.selfPath error:NULL];
-
-    exit(EXIT_SUCCESS);
-}
-
 
 - (void)install
 {
-    NSBundle *theBundle = [NSBundle bundleWithPath:self.hostpath];
-    self.host = [[SUHost alloc] initWithBundle:theBundle];
-    self.installationPath = [[self.host installationPath] copy];
-
+    NSBundle *theBundle = [NSBundle bundleWithPath:self.hostPath];
+    SUHost *host = [[SUHost alloc] initWithBundle:theBundle];
+    NSString *installationPath = [[host installationPath] copy];
+    
     if (self.shouldShowUI) {
-        SUStatusController *statusCtl = [[SUStatusController alloc] initWithHost:self.host]; // We quit anyway after we've installed, so leak this for now.
-        [statusCtl setButtonTitle:SULocalizedString(@"Cancel Update", @"") target:nil action:Nil isDefault:NO];
-        [statusCtl beginActionWithTitle:SULocalizedString(@"Installing update...", @"")
-                        maxProgressValue: 0 statusText: @""];
-        [statusCtl showWindow:self];
-
-        [self.statusController close]; // If there's an existing status controller, close it before we release our strong reference to it.
-        self.statusController = statusCtl; // Keep a strong reference to the status controller, or else it might get prematurely deallocated.
+        self.statusController = [[SUStatusController alloc] initWithHost:host];
+        [self.statusController setButtonTitle:SULocalizedString(@"Cancel Update", @"") target:nil action:Nil isDefault:NO];
+        [self.statusController beginActionWithTitle:SULocalizedString(@"Installing update...", @"")
+                                   maxProgressValue: 0 statusText: @""];
+        [self.statusController showWindow:self];
+    }
+    
+    NSString *fileOperationToolPath = [[[[NSBundle mainBundle] executablePath] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@""SPARKLE_FILEOP_TOOL_NAME];
+    
+    if (![[NSFileManager defaultManager] fileExistsAtPath:fileOperationToolPath]) {
+        SULog(@"Potential Installation Error: File operation tool path %@ is not found", fileOperationToolPath);
+    }
+    
+    [SUInstaller installFromUpdateFolder:self.updateFolderPath
+                                overHost:host
+                        installationPath:installationPath
+                   fileOperationToolPath:fileOperationToolPath
+                       versionComparator:[SUStandardVersionComparator defaultComparator]
+                       completionHandler:^(NSError *error) {
+                           if (error) {
+                               NSError *underlyingError = [error.userInfo objectForKey:NSUnderlyingErrorKey];
+                               if (underlyingError == nil || underlyingError.code != SUInstallationCancelledError) {
+                                   SULog(@"Installation Error: %@", error);
+                                   if (self.shouldShowUI) {
+                                       NSAlert *alert = [[NSAlert alloc] init];
+                                       alert.messageText = @"";
+                                       alert.informativeText = [NSString stringWithFormat:@"%@", [error localizedDescription]];
+                                       [alert runModal];
+                                   }
+                               }
+                               exit(EXIT_FAILURE);
+                           } else {
+                               NSString *pathToRelaunch = nil;
+                               // If the installation path differs from the host path, we give higher precedence for it than
+                               // if the desired relaunch path differs from the host path
+                               if (![installationPath.pathComponents isEqualToArray:self.hostPath.pathComponents] || [self.relaunchPath.pathComponents isEqualToArray:self.hostPath.pathComponents]) {
+                                   pathToRelaunch = installationPath;
+                               } else {
+                                   pathToRelaunch = self.relaunchPath;
+                               }
+                               [self cleanupAndTerminateWithPathToRelaunch:pathToRelaunch];
+                           }
+                       }];
 }
 
-    [SUInstaller installFromUpdateFolder:self.folderpath
-                                overHost:self.host
-                        installationPath:self.installationPath
-                                delegate:self
-                       versionComparator:[SUStandardVersionComparator defaultComparator]];
-}
-
-- (void)installerFinishedForHost:(SUHost *)__unused aHost
+- (void)cleanupAndTerminateWithPathToRelaunch:(NSString *)relaunchPath
 {
-    [self relaunch];
-}
-
-- (void)installerForHost:(SUHost *)__unused host failedWithError:(NSError *)error __attribute__((noreturn))
-{
-    if (self.shouldShowUI)
-        NSRunAlertPanel(@"", @"%@", @"OK", @"", @"", [error localizedDescription]);
-    exit(EXIT_FAILURE);
+    self.isTerminating = YES;
+    
+    dispatch_block_t cleanupAndExit = ^{
+        NSError *theError = nil;
+        if (![[NSFileManager defaultManager] removeItemAtPath:self.updateFolderPath error:&theError]) {
+            SULog(@"Couldn't remove update folder: %@.", theError);
+        }
+        
+        [[NSFileManager defaultManager] removeItemAtPath:[[NSBundle mainBundle] bundlePath] error:NULL];
+        
+        exit(EXIT_SUCCESS);
+    };
+    
+    if (self.shouldRelaunch) {
+        // The auto updater can terminate before the newly updated app is finished launching
+        // If that happens, the OS may not make the updated app active and frontmost
+        // (Or it does become frontmost, but the OS backgrounds it afterwards.. It's some kind of timing/activation issue that doesn't occur all the time)
+        // The only remedy I've been able to find is waiting an arbitrary delay before exiting our application
+        
+        // Don't use -launchApplication: because we may not be launching an application. Eg: it could be a system prefpane
+        if (![[NSWorkspace sharedWorkspace] openFile:relaunchPath]) {
+            SULog(@"Failed to launch %@", relaunchPath);
+        }
+        
+        [self.statusController close];
+        
+        // Don't even think about hiding the app icon from the dock if we've already shown it
+        // Transforming the app back to a background one has a backfiring effect, decreasing the likelihood
+        // that the updated app will be brought up front
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(SUTerminationTimeDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            cleanupAndExit();
+        });
+    } else {
+        cleanupAndExit();
+    }
 }
 
 @end
 
 int main(int __unused argc, const char __unused *argv[])
 {
-	@autoreleasepool {
+    @autoreleasepool
+    {
         NSArray *args = [[NSProcessInfo processInfo] arguments];
         if (args.count < 5 || args.count > 7) {
             return EXIT_FAILURE;
         }
+        
+        NSApplication *application = [NSApplication sharedApplication];
 
-        BOOL shouldShowUI = (args.count > 6) ? [args[6] boolValue] : YES;
-		if (shouldShowUI)
-		{
-            [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
+        BOOL shouldShowUI = (args.count > 6) ? [[args objectAtIndex:6] boolValue] : YES;
+        if (shouldShowUI) {
+            [application activateIgnoringOtherApps:YES];
         }
-
-        [NSApplication sharedApplication];
-        TerminationListener *termListen = [[TerminationListener alloc] initWithHostPath:args[1]
-                                                                         executablePath:args[2]
-                                                                        parentProcessId:[args[3] intValue]
-                                                                             folderPath:args[4]
-                                                                         shouldRelaunch:(args.count > 5) ? [args[5] boolValue] : YES
-                                                                           shouldShowUI:shouldShowUI
-                                                                               selfPath:[[NSBundle mainBundle] bundlePath]];
-
-        [termListen class];
-        [[NSApplication sharedApplication] run];
-
+        
+        AppInstaller *appInstaller = [[AppInstaller alloc] initWithHostPath:[args objectAtIndex:1]
+                                                               relaunchPath:[args objectAtIndex:2]
+                                                            parentProcessId:[[args objectAtIndex:3] intValue]
+                                                           updateFolderPath:[args objectAtIndex:4]
+                                                             shouldRelaunch:(args.count > 5) ? [[args objectAtIndex:5] boolValue] : YES
+                                                               shouldShowUI:shouldShowUI];
+        [application setDelegate:appInstaller];
+        [application run];
     }
 
     return EXIT_SUCCESS;

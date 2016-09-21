@@ -78,20 +78,10 @@
     [super abortUpdate];
 }
 
-- (void)appcast:(SUAppcast *)ac failedToLoadWithError:(NSError *)error
-{
-	if (self.isCanceled)
-	{
-        [self abortUpdate];
-        return;
-    }
-    [super appcast:ac failedToLoadWithError:error];
-}
-
 - (BOOL)itemContainsValidUpdate:(SUAppcastItem *)ui
 {
     // We don't check to see if this update's been skipped, because the user explicitly *asked* if he had the latest version.
-    return [self hostSupportsItem:ui] && [self isItemNewer:ui];
+    return [[self class] hostSupportsItem:ui] && [self isItemNewer:ui];
 }
 
 @end

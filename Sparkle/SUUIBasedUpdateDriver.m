@@ -11,8 +11,24 @@
 #import "SUUpdateAlert.h"
 #import "SUUpdater_Private.h"
 #import "SUHost.h"
+#import "SUOperatingSystem.h"
 #import "SUStatusController.h"
 #import "SUConstants.h"
+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < 1080
+@interface NSByteCountFormatter : NSFormatter {
+@private
+    unsigned int _allowedUnits;
+    char _countStyle;
+    BOOL _allowsNonnumericFormatting, _includesUnit, _includesCount, _includesActualByteCount,
+         _adaptive, _zeroPadsFractionDigits;
+    int _formattingContext;
+    int _reserved[5];
+}
++ (NSString *)stringFromByteCount:(long long)byteCount
+                       countStyle:(NSByteCountFormatterCountStyle)countStyle;
+@end
+#endif
 
 @interface SUUIBasedUpdateDriver ()
 
@@ -26,10 +42,28 @@
 @synthesize statusController;
 @synthesize updateAlert;
 
+- (instancetype)initWithUpdater:(SUUpdater *)anUpdater
+{
+    if ((self = [super initWithUpdater:anUpdater])) {
+        self.automaticallyInstallUpdates = NO;
+    }
+    return self;
+}
+
 - (void)didFindValidUpdate
 {
-    self.updateAlert = [[SUUpdateAlert alloc] initWithAppcastItem:self.updateItem host:self.host];
-    [self.updateAlert setDelegate:self];
+    if ([[self.updater delegate] respondsToSelector:@selector(updater:didFindValidUpdate:)]) {
+        [[self.updater delegate] updater:self.updater didFindValidUpdate:self.updateItem];
+    }
+
+    if (self.automaticallyInstallUpdates) {
+        [self updateAlertFinishedWithChoice:SUInstallUpdateChoice];
+        return;
+    }
+
+    self.updateAlert = [[SUUpdateAlert alloc] initWithAppcastItem:self.updateItem host:self.host completionBlock:^(SUUpdateAlertChoice choice) {
+        [self updateAlertFinishedWithChoice:choice];
+    }];
 
     id<SUVersionDisplay> versDisp = nil;
     if ([[self.updater delegate] respondsToSelector:@selector(versionDisplayerForUpdater:)]) {
@@ -37,15 +71,10 @@
     }
     [self.updateAlert setVersionDisplayer:versDisp];
 
-    if ([[self.updater delegate] respondsToSelector:@selector(updater:didFindValidUpdate:)]) {
-        [[self.updater delegate] updater:self.updater didFindValidUpdate:self.updateItem];
-    }
-
     // If the app is a menubar app or the like, we need to focus it first and alter the
     // update prompt to behave like a normal window. Otherwise if the window were hidden
     // there may be no way for the application to be activated to make it visible again.
-    if ([self.host isBackgroundApplication])
-	{
+    if ([self.host isBackgroundApplication]) {
         [[self.updateAlert window] setHidesOnDeactivate:NO];
         [NSApp activateIgnoringOtherApps:YES];
     }
@@ -63,12 +92,14 @@
         [[self.updater delegate] updaterDidNotFindUpdate:self.updater];
     [[NSNotificationCenter defaultCenter] postNotificationName:SUUpdaterDidNotFindUpdateNotification object:self.updater];
 
-    NSAlert *alert = [NSAlert alertWithMessageText:SULocalizedString(@"You're up-to-date!", "Status message shown when the user checks for updates but is already current or the feed doesn't contain any updates.")
-                                     defaultButton:SULocalizedString(@"OK", nil)
-                                   alternateButton:nil
-                                       otherButton:nil
-                         informativeTextWithFormat:SULocalizedString(@"%@ %@ is currently the newest version available.", nil), [self.host name], [self.host displayVersion]];
-    [self showModalAlert:alert];
+    if (!self.automaticallyInstallUpdates) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = SULocalizedString(@"You're up-to-date!", "Status message shown when the user checks for updates but is already current or the feed doesn't contain any updates.");
+        alert.informativeText = [NSString stringWithFormat:SULocalizedString(@"%@ %@ is currently the newest version available.", nil), [self.host name], [self.host displayVersion]];
+        [alert addButtonWithTitle:SULocalizedString(@"OK", nil)];
+        [self showAlert:alert];
+    }
+    
     [self abortUpdate];
 }
 
@@ -78,12 +109,11 @@
     [[NSNotificationCenter defaultCenter] removeObserver:self name:NSApplicationDidBecomeActiveNotification object:NSApp];
 }
 
-- (void)updateAlert:(SUUpdateAlert *)__unused alert finishedWithChoice:(SUUpdateAlertChoice)choice
+- (void)updateAlertFinishedWithChoice:(SUUpdateAlertChoice)choice
 {
     self.updateAlert = nil;
     [self.host setObject:nil forUserDefaultsKey:SUSkippedVersionKey];
-	switch (choice)
-	{
+    switch (choice) {
         case SUInstallUpdateChoice:
             self.statusController = [[SUStatusController alloc] initWithHost:self.host];
             [self.statusController beginActionWithTitle:SULocalizedString(@"Downloading update...", @"Take care not to overflow the status window.") maxProgressValue:0.0 statusText:nil];
@@ -113,36 +143,52 @@
     [self.statusController setMaxProgressValue:[response expectedContentLength]];
 }
 
-- (NSString *)humanReadableSizeFromDouble:(double)value
+- (NSString *)localizedStringFromByteCount:(long long)value
 {
-    if (value < 1000) {
-        return [NSString stringWithFormat:@"%.0lf %@", value, SULocalizedString(@"B", @"the unit for bytes")];
+    if (![SUOperatingSystem isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){10, 8, 0}]) {
+        if (value < 1000) {
+            return [NSString stringWithFormat:@"%.0lf %@", value / 1.0,
+                    SULocalizedString(@"B", @"the unit for bytes")];
+        }
+
+        if (value < 1000 * 1000) {
+            return [NSString stringWithFormat:@"%.0lf %@", value / 1000.0,
+                    SULocalizedString(@"KB", @"the unit for kilobytes")];
+        }
+
+        if (value < 1000 * 1000 * 1000) {
+            return [NSString stringWithFormat:@"%.1lf %@", value / 1000.0 / 1000.0,
+                    SULocalizedString(@"MB", @"the unit for megabytes")];
+        }
+
+        return [NSString stringWithFormat:@"%.2lf %@", value / 1000.0 / 1000.0 / 1000.0,
+                SULocalizedString(@"GB", @"the unit for gigabytes")];
     }
 
-    if (value < 1000 * 1000) {
-        return [NSString stringWithFormat:@"%.0lf %@", value / 1000.0, SULocalizedString(@"KB", @"the unit for kilobytes")];
-    }
-
-    if (value < 1000 * 1000 * 1000) {
-        return [NSString stringWithFormat:@"%.1lf %@", value / 1000.0 / 1000.0, SULocalizedString(@"MB", @"the unit for megabytes")];
-    }
-
-    return [NSString stringWithFormat:@"%.2lf %@", value / 1000.0 / 1000.0 / 1000.0, SULocalizedString(@"GB", @"the unit for gigabytes")];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
+    return [NSByteCountFormatter stringFromByteCount:value
+                                          countStyle:NSByteCountFormatterCountStyleFile];
+#pragma clang diagnostic pop
 }
 
 - (void)download:(NSURLDownload *)__unused download didReceiveDataOfLength:(NSUInteger)length
 {
     [self.statusController setProgressValue:[self.statusController progressValue] + (double)length];
     if ([self.statusController maxProgressValue] > 0.0)
-        [self.statusController setStatusText:[NSString stringWithFormat:SULocalizedString(@"%@ of %@", nil), [self humanReadableSizeFromDouble:[self.statusController progressValue]], [self humanReadableSizeFromDouble:[self.statusController maxProgressValue]]]];
+        [self.statusController setStatusText:[NSString stringWithFormat:SULocalizedString(@"%@ of %@", nil), [self localizedStringFromByteCount:(long long)self.statusController.progressValue], [self localizedStringFromByteCount:(long long)self.statusController.maxProgressValue]]];
     else
-        [self.statusController setStatusText:[NSString stringWithFormat:SULocalizedString(@"%@ downloaded", nil), [self humanReadableSizeFromDouble:[self.statusController progressValue]]]];
+        [self.statusController setStatusText:[NSString stringWithFormat:SULocalizedString(@"%@ downloaded", nil), [self localizedStringFromByteCount:(long long)self.statusController.progressValue]]];
 }
 
 - (IBAction)cancelDownload:(id)__unused sender
 {
-    if (self.download)
+    if (self.download) {
         [self.download cancel];
+        if ([[self.updater delegate] respondsToSelector:@selector(userDidCancelDownload:)]) {
+            [[self.updater delegate] userDidCancelDownload:self.updater];
+        }
+    }
     [self abortUpdate];
 }
 
@@ -154,20 +200,22 @@
     [super extractUpdate];
 }
 
-- (void)unarchiver:(SUUnarchiver *)__unused ua extractedLength:(unsigned long)length
+- (void)unarchiver:(SUUnarchiver *)__unused ua extractedProgress:(double)progress
 {
     // We do this here instead of in extractUpdate so that we only have a determinate progress bar for archives with progress.
-	if ([self.statusController maxProgressValue] == 0.0)
-	{
-        NSDictionary *attributes;
-        attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:self.downloadPath error:nil];
-        [self.statusController setMaxProgressValue:[attributes[NSFileSize] doubleValue]];
+	if ([self.statusController maxProgressValue] == 0.0) {
+        [self.statusController setMaxProgressValue:1];
     }
-    [self.statusController setProgressValue:[self.statusController progressValue] + (double)length];
+    [self.statusController setProgressValue:progress];
 }
 
 - (void)unarchiverDidFinish:(SUUnarchiver *)__unused ua
 {
+    if (self.automaticallyInstallUpdates) {
+        [self installWithToolAndRelaunch:YES];
+        return;
+    }
+
     [self.statusController beginActionWithTitle:SULocalizedString(@"Ready to Install", nil) maxProgressValue:1.0 statusText:nil];
     [self.statusController setProgressValue:1.0]; // Fill the bar.
     [self.statusController setButtonEnabled:YES];
@@ -205,8 +253,11 @@
 
 - (void)abortUpdateWithError:(NSError *)error
 {
-    NSAlert *alert = [NSAlert alertWithMessageText:SULocalizedString(@"Update Error!", nil) defaultButton:SULocalizedString(@"Cancel Update", nil) alternateButton:nil otherButton:nil informativeTextWithFormat:@"%@", [error localizedDescription]];
-    [self showModalAlert:alert];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = SULocalizedString(@"Update Error!", nil);
+    alert.informativeText = [NSString stringWithFormat:@"%@", [error localizedDescription]];
+    [alert addButtonWithTitle:SULocalizedString(@"Cancel Update", nil)];
+    [self showAlert:alert];
     [super abortUpdateWithError:error];
 }
 
@@ -220,7 +271,7 @@
     [super abortUpdate];
 }
 
-- (void)showModalAlert:(NSAlert *)alert
+- (void)showAlert:(NSAlert *)alert
 {
     if ([[self.updater delegate] respondsToSelector:@selector(updaterWillShowModalAlert:)]) {
         [[self.updater delegate] updaterWillShowModalAlert:self.updater];

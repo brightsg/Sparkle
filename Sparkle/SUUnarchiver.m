@@ -18,15 +18,15 @@
 @implementation SUUnarchiver
 
 @synthesize archivePath;
-@synthesize updateHost;
+@synthesize updateHostBundlePath;
 @synthesize delegate;
+@synthesize decryptionPassword;
 
-+ (SUUnarchiver *)unarchiverForPath:(NSString *)path updatingHost:(SUHost *)host
++ (SUUnarchiver *)unarchiverForPath:(NSString *)path updatingHostBundlePath:(NSString *)hostPath withPassword:(NSString *)decryptionPassword
 {
-	for (id current in [self unarchiverImplementations])
-	{
+    for (id current in [self unarchiverImplementations]) {
         if ([current canUnarchivePath:path]) {
-            return [[current alloc] initWithPath:path host:host];
+            return [[current alloc] initWithPath:path hostBundlePath:hostPath password:decryptionPassword];
         }
     }
     return nil;
@@ -39,12 +39,13 @@
     // No-op
 }
 
-- (instancetype)initWithPath:(NSString *)path host:(SUHost *)host
+- (instancetype)initWithPath:(NSString *)path hostBundlePath:(NSString *)hostPath password:(NSString *)password
 {
     if ((self = [super init]))
     {
         archivePath = [path copy];
-        updateHost = host;
+        updateHostBundlePath = hostPath;
+        decryptionPassword = password;
     }
     return self;
 }
@@ -54,10 +55,10 @@
     return NO;
 }
 
-- (void)notifyDelegateOfExtractedLength:(size_t)length
+- (void)notifyDelegateOfProgress:(double)progress
 {
-    if ([self.delegate respondsToSelector:@selector(unarchiver:extractedLength:)]) {
-        [self.delegate unarchiver:self extractedLength:length];
+    if ([self.delegate respondsToSelector:@selector(unarchiver:extractedProgress:)]) {
+        [self.delegate unarchiver:self extractedProgress:progress];
     }
 }
 
