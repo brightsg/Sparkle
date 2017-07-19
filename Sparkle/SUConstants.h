@@ -21,6 +21,8 @@ extern const NSTimeInterval SUDefaultUpdateCheckInterval;
 
 extern NSString *const SUBundleIdentifier;
 
+extern NSString *const SUAppcastAttributeValueMacOS;
+
 // -----------------------------------------------------------------------------
 //	Notifications:
 // -----------------------------------------------------------------------------
@@ -47,7 +49,6 @@ extern NSString *const SUEnableSystemProfilingKey;
 extern NSString *const SUSendProfileInfoKey;
 extern NSString *const SULastProfileSubmitDateKey;
 extern NSString *const SUPromptUserOnFirstLaunchKey;
-extern NSString *const SUKeepDownloadOnFailedInstallKey;
 extern NSString *const SUDefaultsDomainKey;
 extern NSString *const SUEnableJavaScriptKey;
 extern NSString *const SUFixedHTMLDisplaySizeKey __attribute__((deprecated("This key is obsolete and has no effect.")));
@@ -64,6 +65,9 @@ extern NSString *const SUAppcastAttributeDeltaFrom;
 extern NSString *const SUAppcastAttributeDSASignature;
 extern NSString *const SUAppcastAttributeShortVersionString;
 extern NSString *const SUAppcastAttributeVersion;
+extern NSString *const SUAppcastAttributeOsType;
+
+
 
 extern NSString *const SUAppcastElementCriticalUpdate;
 extern NSString *const SUAppcastElementDeltas;

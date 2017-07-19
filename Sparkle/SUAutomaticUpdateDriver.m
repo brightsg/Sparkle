@@ -29,7 +29,6 @@ static const NSTimeInterval SUAutomaticUpdatePromptImpatienceTimer = 60 * 60 * 2
 @interface SUAutomaticUpdateDriver ()
 
 @property (assign) BOOL postponingInstallation;
-@property (assign) BOOL showErrors;
 @property (assign) BOOL willUpdateOnTermination;
 @property (assign) BOOL isTerminating;
 @property (strong) SUAutomaticUpdateAlert *alert;
@@ -40,7 +39,6 @@ static const NSTimeInterval SUAutomaticUpdatePromptImpatienceTimer = 60 * 60 * 2
 @implementation SUAutomaticUpdateDriver
 
 @synthesize postponingInstallation;
-@synthesize showErrors;
 @synthesize willUpdateOnTermination;
 @synthesize isTerminating;
 @synthesize alert;
@@ -51,26 +49,29 @@ static const NSTimeInterval SUAutomaticUpdatePromptImpatienceTimer = 60 * 60 * 2
     self.interruptible = NO;
     [self invalidateShowUpdateAlertTimer];
 
-    if (self.alert) {
-        [self.alert close];
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.alert) {
+            [self.alert close];
+        }
 
-    self.alert = [[SUAutomaticUpdateAlert alloc] initWithAppcastItem:self.updateItem host:self.host completionBlock:^(SUAutomaticInstallationChoice choice) {
-        [self automaticUpdateAlertFinishedWithChoice:choice];
-    }];
+        self.alert = [[SUAutomaticUpdateAlert alloc] initWithAppcastItem:self.updateItem host:self.host completionBlock:^(SUAutomaticInstallationChoice choice) {
+            [self automaticUpdateAlertFinishedWithChoice:choice];
+        }];
 
-    // If the app is a menubar app or the like, we need to focus it first and alter the
-    // update prompt to behave like a normal window. Otherwise if the window were hidden
-    // there may be no way for the application to be activated to make it visible again.
-    if ([SUApplicationInfo isBackgroundApplication:[NSApplication sharedApplication]]) {
-        [[self.alert window] setHidesOnDeactivate:NO];
-        [NSApp activateIgnoringOtherApps:YES];
-    }
+        // If the app is a menubar app or the like, we need to focus it first and alter the
+        // update prompt to behave like a normal window. Otherwise if the window were hidden
+        // there may be no way for the application to be activated to make it visible again.
+        if ([SUApplicationInfo isBackgroundApplication:[NSApplication sharedApplication]]) {
+            [[self.alert window] setHidesOnDeactivate:NO];
+            [NSApp activateIgnoringOtherApps:YES];
+        }
 
-    if ([NSApp isActive])
-        [[self.alert window] makeKeyAndOrderFront:self];
-    else
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
+        if ([NSApp isActive]) {
+            [[self.alert window] makeKeyAndOrderFront:self];
+        } else {
+            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
+        }
+    });
 }
 
 - (void)unarchiverDidFinish:(id)__unused ua
@@ -202,7 +203,6 @@ static const NSTimeInterval SUAutomaticUpdatePromptImpatienceTimer = 60 * 60 * 2
         [self stopUpdatingOnTermination];
     }
 
-    self.showErrors = YES;
     [super installWithToolAndRelaunch:relaunch displayingUserInterface:showUI];
 }
 
@@ -228,23 +228,6 @@ static const NSTimeInterval SUAutomaticUpdatePromptImpatienceTimer = 60 * 60 * 2
 {
     if (!self.isTerminating) {
         [super terminateApp];
-    }
-}
-
-- (void)abortUpdateWithError:(NSError *)error
-{
-    if (self.showErrors) {
-        [super abortUpdateWithError:error];
-    } else {
-        // Call delegate separately here because otherwise it won't know we stopped.
-        // Normally this gets called by the superclass
-        id<SUUpdaterPrivate> updater = self.updater;
-        id<SUUpdaterDelegate> updaterDelegate = [updater delegate];
-        if ([updaterDelegate respondsToSelector:@selector(updater:didAbortWithError:)]) {
-            [updaterDelegate updater:self.updater didAbortWithError:error];
-        }
-
-        [self abortUpdate];
     }
 }
 
