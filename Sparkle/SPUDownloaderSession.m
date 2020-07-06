@@ -29,8 +29,7 @@
 
 - (void)startDownloadWithRequest:(SPUURLRequest *)request
 {
-    NSOperationQueue *queue = [[NSOperationQueue alloc] init];
-    queue.maxConcurrentOperationCount = 1;
+    NSOperationQueue *queue = [NSOperationQueue mainQueue];
     self.downloadSession = [NSURLSession
                              sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]
                              delegate:self
@@ -151,6 +150,7 @@
 -(void)cleanup
 {
     [self.download cancel];
+    [self.downloadSession invalidateAndCancel];
     self.download = nil;
     self.downloadSession = nil;
     [super cleanup];
