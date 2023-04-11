@@ -2821,7 +2821,7 @@
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 			};
 			name = Coverage;
 		};
@@ -2847,6 +2847,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 149B78641B7D3A4800D7D62C /* ConfigUnitTestCoverage.xcconfig */;
 			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 			};
 			name = Coverage;
 		};
@@ -2916,7 +2917,7 @@
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 			};
 			name = Debug;
 		};
@@ -2925,6 +2926,7 @@
 			baseConfigurationReference = FA1941CC0D94A70100DD942E /* ConfigCommonRelease.xcconfig */;
 			buildSettings = {
 				ARCHS = "$(NATIVE_ARCH_ACTUAL)";
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
 			};
 			name = Release;
@@ -2952,6 +2954,7 @@
 			baseConfigurationReference = 5AB8F1AA214DA85900A1187F /* ConfigGenerateKeysDebug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -2962,6 +2965,7 @@
 			baseConfigurationReference = 5AB8F1AA214DA85900A1187F /* ConfigGenerateKeysDebug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Coverage;
@@ -2971,6 +2975,7 @@
 			baseConfigurationReference = 5AB8F1A9214DA85900A1187F /* ConfigGenerateKeysRelease.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -2980,6 +2985,7 @@
 			baseConfigurationReference = 7205C4351E12CA7000E370AE /* ConfigGenerateAppcastDebug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 			};
 			name = Debug;
 		};
@@ -2988,6 +2994,7 @@
 			baseConfigurationReference = 7205C4351E12CA7000E370AE /* ConfigGenerateAppcastDebug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 			};
 			name = Coverage;
 		};
@@ -2996,6 +3003,7 @@
 			baseConfigurationReference = 7205C4341E12C66D00E370AE /* ConfigGenerateAppcastRelease.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 			};
 			name = Release;
 		};
@@ -3004,6 +3012,7 @@
 			baseConfigurationReference = 5AB8F1AA214DA85900A1187F /* ConfigGenerateKeysDebug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 			};
@@ -3014,6 +3023,7 @@
 			baseConfigurationReference = 5AB8F1AA214DA85900A1187F /* ConfigGenerateKeysDebug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 			};
@@ -3024,6 +3034,7 @@
 			baseConfigurationReference = 5AB8F1A9214DA85900A1187F /* ConfigGenerateKeysRelease.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 			};
@@ -3047,6 +3058,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = FA3AAF3A1050B273004B3130 /* ConfigUnitTestDebug.xcconfig */;
 			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 			};
 			name = Debug;
 		};
@@ -3054,6 +3066,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = FA3AAF391050B273004B3130 /* ConfigUnitTestRelease.xcconfig */;
 			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 			};
 			name = Release;
 		};
